@@ -1,0 +1,84 @@
+services:
+  db:
+    image: mariadb:11.4
+    container_name: nextcloud-db
+    restart: unless-stopped
+    command: >
+      --transaction-isolation=READ-COMMITTED
+      --log-bin=binlog
+      --binlog-format=ROW
+    volumes:
+      - db_data:/var/lib/mysql
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MYSQL_DATABASE}
+      MARIADB_USER: ${MYSQL_USER}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD}
+      MARIADB_AUTO_UPGRADE: "1"
+    networks:
+      - nextcloud
+
+  redis:
+    image: redis:7-alpine
+    container_name: nextcloud-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    networks:
+      - nextcloud
+
+  app:
+    image: nextcloud:33-apache
+    container_name: nextcloud-app
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    ports:
+      # Defaults to localhost-only so a reverse proxy on the same host can reach it.
+      # If your proxy runs on a different host, set HTTP_BIND=<lan-ip>:8080 in .env
+      - "${HTTP_BIND:-127.0.0.1:8080}:80"
+    volumes:
+      - nextcloud_app:/var/www/html
+      # Host path for user data. Defaults to ./data; in production point this at a
+      # dedicated (e.g. LUKS-encrypted) mount. MUST be empty for a fresh install.
+      - ${NEXTCLOUD_DATA_PATH:-./data}:/var/www/html/data
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_HOST_PASSWORD: ${REDIS_PASSWORD}
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD}
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NEXTCLOUD_TRUSTED_DOMAINS}
+      NEXTCLOUD_DATA_DIR: /var/www/html/data
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES}
+      OVERWRITEPROTOCOL: https
+      OVERWRITEHOST: ${OVERWRITEHOST}
+      OVERWRITECLIURL: ${OVERWRITECLIURL}
+      PHP_MEMORY_LIMIT: 1G
+      PHP_UPLOAD_LIMIT: 16G
+    networks:
+      - nextcloud
+
+  cron:
+    image: nextcloud:33-apache
+    container_name: nextcloud-cron
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - nextcloud_app:/var/www/html
+      - ${NEXTCLOUD_DATA_PATH:-./data}:/var/www/html/data
+    entrypoint: /cron.sh
+    networks:
+      - nextcloud
+
+volumes:
+  db_data:
+  nextcloud_app:
+
+networks:
+  nextcloud:
